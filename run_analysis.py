@@ -26,8 +26,15 @@ def log_array_info(name, array):
     logging.info(f"{name} - Shape: {array.shape}, Type: {array.dtype}, "
                 f"Range: [{array.min():.2f}, {array.max():.2f}]")
 
-def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None):
-    """Process nd2 file with saved ROIs"""
+def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None, group_info=None):
+    """Process nd2 file with saved ROIs
+    
+    Args:
+        nd2_path: Path to ND2 file
+        roi_path: Path to ROI JSON file
+        save_dir: Directory to save results
+        group_info: Dictionary containing group assignments for this sample
+    """
     nd2_filename = Path(nd2_path).stem
     roi_filename = Path(roi_path).stem
     
@@ -49,6 +56,10 @@ def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None):
     logging.info("Loading ROI data...")
     with open(roi_path) as f:
         roi_data = json.load(f)
+    
+    # Add group information to ROI data if provided
+    if group_info is not None:
+        roi_data['group_info'] = group_info
     
     total_rois = len(roi_data['rois'])
     logging.info(f"Found {total_rois} ROIs to process")
@@ -78,8 +89,15 @@ def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None):
             # Create summary text with group information
             summary_text = [f"Analysis Summary for {Path(nd2_path).name}\n\n"]
             
+            # Add sample group information if available
+            if group_info:
+                summary_text.append("Sample Group Information:")
+                for factor, value in group_info.items():
+                    summary_text.append(f"{factor}: {value}")
+                summary_text.append("\n")
+            
             # Add group summaries
-            summary_text.append("Group Summaries:")
+            summary_text.append("ROI Group Summaries:")
             for group, metrics in group_results.items():
                 n_rois = len(metrics['rois'])
                 if n_rois > 0:
@@ -139,17 +157,22 @@ def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None):
     excel_path = results_dir / f"{Path(nd2_path).stem}_analysis_summary.xlsx"
     if group_results:
         with pd.ExcelWriter(excel_path) as writer:
-            # Summary sheet
+            # Summary sheet with group information
             summary_rows = []
             for group, metrics in group_results.items():
                 for roi_metric in metrics['roi_metrics']:
-                    summary_rows.append({
+                    row_data = {
                         'Group': group,
                         'ROI': roi_metric['roi_index'],
                         'Total Cells': roi_metric['total_cells'],
                         'Cell Density (mm²)': roi_metric['cell_density_mm2'],
                         'Area (mm²)': roi_metric['area_mm2']
-                    })
+                    }
+                    # Add group information if available
+                    if group_info:
+                        for factor, value in group_info.items():
+                            row_data[f'Sample {factor}'] = value
+                    summary_rows.append(row_data)
             
             df_summary = pd.DataFrame(summary_rows)
             df_summary.to_excel(writer, sheet_name='ROI Summary', index=False)
@@ -162,14 +185,19 @@ def process_nd2_with_rois(nd2_path, roi_path=None, save_dir=None):
                     avg_density = metrics['total_cells'] / metrics['total_area'] if metrics['total_area'] > 0 else 0
                     density_std = np.std(metrics['cell_densities']) if len(metrics['cell_densities']) > 1 else 0
                     
-                    group_summary_rows.append({
+                    row_data = {
                         'Group': group,
                         'Number of ROIs': n_rois,
                         'Total Cells': metrics['total_cells'],
                         'Total Area (mm²)': metrics['total_area'],
                         'Average Density (cells/mm²)': avg_density,
                         'Density Std Dev': density_std
-                    })
+                    }
+                    # Add group information if available
+                    if group_info:
+                        for factor, value in group_info.items():
+                            row_data[f'Sample {factor}'] = value
+                    group_summary_rows.append(row_data)
             
             df_group = pd.DataFrame(group_summary_rows)
             df_group.to_excel(writer, sheet_name='Group Summary', index=False)

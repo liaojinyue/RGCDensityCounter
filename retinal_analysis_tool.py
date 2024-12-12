@@ -7,11 +7,13 @@ from run_analysis import process_nd2_with_rois
 from pathlib import Path
 import sys
 import logging
+from batch_analysis import BatchAnalyzer
 
 class RetinalAnalysisTool(QMainWindow):
     def __init__(self):
         super().__init__()
         self.roi_window = None  # Store reference to ROI window
+        self.batch_analyzer = None
         self.initUI()
         
     def initUI(self):
@@ -97,13 +99,6 @@ class RetinalAnalysisTool(QMainWindow):
             "2. Choose one of the following options:\n"
             "   • ROI Selection: Open the file to select regions of interest\n"
             "   • Run Analysis: Process the file with existing ROIs\n\n"
-            "ROI Selection Tips:\n"
-            "- Click center of retina for reference circles\n"
-            "- Hold Shift and drag to draw ROIs (auto-completes near start point)\n"
-            "- Ctrl+click to delete ROI\n"
-            "- +/- keys to zoom\n"
-            "- Drag to pan\n\n"
-             "Happy drawing!\n"
         )
         instructions.setStyleSheet("""
             QLabel {
@@ -122,10 +117,38 @@ class RetinalAnalysisTool(QMainWindow):
         # Set window size and position
         self.setGeometry(100, 100, 600, 600)
         
+        # Add batch analysis section
+        batch_frame = QFrame()
+        batch_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        batch_layout = QVBoxLayout(batch_frame)
+        
+        batch_label = QLabel('If you have multiple ND2 files:')
+        batch_label.setStyleSheet('font-weight: bold;')
+        batch_layout.addWidget(batch_label)
+        
+        # Single batch analysis button
+        batch_btn = QPushButton('Batch Analysis')
+        batch_btn.clicked.connect(self.show_batch_options)
+        batch_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                padding: 12px;
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        batch_layout.addWidget(batch_btn)
+        
+        main_layout.addWidget(batch_frame)
+        
     def select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select ND2 File",
+            "Select single ND2 File",
             "",
             "ND2 Files (*.nd2)"
         )
@@ -288,6 +311,162 @@ class RetinalAnalysisTool(QMainWindow):
         # Connect buttons to functions
         self.roi_button.clicked.connect(self.start_roi_selection)
         self.analysis_button.clicked.connect(self.run_analysis_with_existing)
+
+    def select_data_folder(self):
+        """Select folder containing multiple ND2 files"""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Data Folder",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+        
+        if folder:
+            # Create BatchAnalyzer with self as parent
+            self.batch_analyzer = BatchAnalyzer(folder)
+            # Set the parent window for group assignment
+            self.batch_analyzer.parent_window = self
+            return folder
+        return None
+    
+    def batch_roi_selection(self):
+        """Start batch ROI selection"""
+        folder = self.select_data_folder()
+        if folder:
+            try:
+                # Show progress dialog
+                progress = self.show_progress("Initializing", "Starting batch ROI selection...")
+                QApplication.processEvents()
+                
+                # Run batch ROI selection
+                self.batch_analyzer.roi_selection_mode()
+                
+                progress.close()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error during batch ROI selection: {str(e)}")
+                if 'progress' in locals():
+                    progress.close()
+    
+    def batch_analysis(self):
+        """Run batch analysis on existing ROIs"""
+        folder = self.select_data_folder()
+        if folder:
+            try:
+                # First assign groups (without progress dialog)
+                if not self.batch_analyzer.assign_groups():
+                    # If group assignment was cancelled or failed
+                    return
+                
+                # After group assignment is complete and successful, show progress dialog
+                progress = self.show_progress("Initializing", "Starting batch analysis...")
+                QApplication.processEvents()
+                
+                # Run analysis
+                results = self.batch_analyzer.analyze_all_samples()
+                
+                # Update progress
+                progress.setLabelText("Generating summary report...")
+                QApplication.processEvents()
+                
+                # Generate report
+                report_dir = self.batch_analyzer.generate_summary_report(results)
+                
+                progress.close()
+                
+                # Show completion message
+                QMessageBox.information(
+                    self,
+                    "Analysis Complete",
+                    f"Batch analysis complete!\n\nResults saved in:\n{report_dir}"
+                )
+                
+            except Exception as e:
+                if 'progress' in locals():
+                    progress.close()
+                QMessageBox.critical(self, "Error", f"Error during batch analysis: {str(e)}")
+    
+    def full_batch_pipeline(self):
+        """Run full batch pipeline"""
+        folder = self.select_data_folder()
+        if folder:
+            try:
+                # ROI selection first
+                progress = self.show_progress("Initializing", "Starting ROI selection...")
+                QApplication.processEvents()
+                self.batch_analyzer.roi_selection_mode()
+                progress.close()
+                
+                # Then group assignment (without progress dialog)
+                if not self.batch_analyzer.assign_groups():
+                    # If group assignment was cancelled or failed
+                    return
+                
+                # After group assignment, show progress for analysis
+                progress = self.show_progress("Processing", "Running analysis...")
+                QApplication.processEvents()
+                
+                # Analysis
+                results = self.batch_analyzer.analyze_all_samples()
+                
+                # Update progress
+                progress.setLabelText("Generating summary report...")
+                QApplication.processEvents()
+                
+                # Generate report
+                report_dir = self.batch_analyzer.generate_summary_report(results)
+                
+                progress.close()
+                
+                # Show completion message
+                QMessageBox.information(
+                    self,
+                    "Pipeline Complete",
+                    f"Full batch pipeline complete!\n\nResults saved in:\n{report_dir}"
+                )
+                
+            except Exception as e:
+                if 'progress' in locals():
+                    progress.close()
+                QMessageBox.critical(self, "Error", f"Error during batch pipeline: {str(e)}")
+
+    def show_batch_options(self):
+        """Show dialog with batch analysis options"""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Batch Analysis Options")
+        msg.setText("Put all ND2 files in one folder and select the folder:")
+        msg.setIcon(QMessageBox.Question)
+        
+        # Add custom buttons with descriptive text
+        roi_button = msg.addButton("ROI Selection Mode\n(Select ROIs for all ND2 files)", 
+                                  QMessageBox.ActionRole)
+        analysis_button = msg.addButton("Analysis Mode\n(Run analysis with existing ROIs)", 
+                                       QMessageBox.ActionRole)
+        pipeline_button = msg.addButton("Full Pipeline\n(ROI Selection followed by Analysis)", 
+                                       QMessageBox.ActionRole)
+        cancel_button = msg.addButton(QMessageBox.Cancel)
+        
+        # Style the buttons
+        button_style = """
+            QPushButton {
+                min-width: 200px;
+                padding: 10px;
+                text-align: left;
+            }
+        """
+        for button in [roi_button, analysis_button, pipeline_button]:
+            button.setStyleSheet(button_style)
+        
+        msg.exec_()
+        
+        # Handle button clicks
+        clicked_button = msg.clickedButton()
+        if clicked_button == roi_button:
+            self.batch_roi_selection()
+        elif clicked_button == analysis_button:
+            self.batch_analysis()
+        elif clicked_button == pipeline_button:
+            self.full_batch_pipeline()
 
 def main():
     app = QApplication(sys.argv)

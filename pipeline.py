@@ -38,9 +38,19 @@ class RetinalImageAnalyzer:
         self.dapi_channel = None
         
         # Initialize Cellpose models
-        self.cell_model = models.CellposeModel(pretrained_model = './models/rgc', gpu=False)
-        self.nuclei_model = models.Cellpose(model_type='cyto2', gpu=False)
-        
+        try:
+            # Try to load custom RGC model
+            self.cell_model = models.CellposeModel(pretrained_model='./models/rgc/rgc.zip', gpu=False)
+            logging.info("Loaded custom RGC model")
+        except Exception as e:
+            # Fall back to cyto2 if custom model not found
+            logging.warning(f"Could not load custom RGC model: {str(e)}")
+            logging.info("Falling back to cyto2 model")
+            self.cell_model = models.Cellpose(model_type='cyto2', gpu=False)
+
+        # For nuclei detection (if needed)
+        self.nuclei_model = models.Cellpose(model_type='nuclei', gpu=False)
+
         # Updated parameters
         self.cell_params = {
             'diameter': 30,

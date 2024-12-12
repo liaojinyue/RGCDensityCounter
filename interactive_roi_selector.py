@@ -612,41 +612,40 @@ class ImageViewer(QGraphicsView):
         return rgb
 
 class MainWindow(QMainWindow):
-    def __init__(self, nd2_path):
+    # Define class-level attributes for regions and colors
+    regions = [
+        'Temporal_Peripheral', 'Temporal_Middle', 'Temporal_Central',
+        'Superior_Peripheral', 'Superior_Middle', 'Superior_Central', 
+        'Inferior_Peripheral', 'Inferior_Middle', 'Inferior_Central',
+        'Nasal_Peripheral', 'Nasal_Middle', 'Nasal_Central'
+    ]
+    
+    region_colors = {
+        'Temporal_Peripheral': '#E76F51',  # Terracotta
+        'Temporal_Middle': '#F4A261',      # Sandy brown
+        'Temporal_Central': '#E67E22',     # Darker coral
+        
+        'Superior_Peripheral': '#1D3557',  # Dark blue
+        'Superior_Middle': '#457B9D',      # Steel blue
+        'Superior_Central': '#2E86C1',     # Darker blue
+        
+        'Inferior_Peripheral': '#2D6A4F',  # Forest green
+        'Inferior_Middle': '#40916C',      # Medium green
+        'Inferior_Central': '#2E7D32',     # Darker green
+        
+        'Nasal_Peripheral': '#7B2CBF',     # Deep purple
+        'Nasal_Middle': '#9D4EDD',         # Medium purple
+        'Nasal_Central': '#8E44AD'         # Darker purple
+    }
+
+    def __init__(self, nd2_path, batch_mode=False):
         super().__init__()
         self.nd2_path = Path(nd2_path)
         self.nd2_handler = None
         self.red_channel = None
         self.dapi_channel = None
-        self.current_group = "Temporal_Peripheral"  # Update default group
-        
-        # Define regions here so it's accessible throughout the class
-        self.regions = [
-            'Temporal_Peripheral', 'Temporal_Middle', 'Temporal_Central',
-            'Superior_Peripheral', 'Superior_Middle', 'Superior_Central', 
-            'Inferior_Peripheral', 'Inferior_Middle', 'Inferior_Central',
-            'Nasal_Peripheral', 'Nasal_Middle', 'Nasal_Central'
-        ]
-        
-        # Define custom colors for anatomical regions
-        self.region_colors = {
-            'Temporal_Peripheral': '#E76F51',  # Terracotta
-            'Temporal_Middle': '#F4A261',      # Sandy brown
-            'Temporal_Central': '#E67E22',     # Darker coral
-            
-            'Superior_Peripheral': '#1D3557',  # Dark blue
-            'Superior_Middle': '#457B9D',      # Steel blue
-            'Superior_Central': '#2E86C1',     # Darker blue
-            
-            'Inferior_Peripheral': '#2D6A4F',  # Forest green
-            'Inferior_Middle': '#40916C',      # Medium green
-            'Inferior_Central': '#2E7D32',     # Darker green
-            
-            'Nasal_Peripheral': '#7B2CBF',     # Deep purple
-            'Nasal_Middle': '#9D4EDD',         # Medium purple
-            'Nasal_Central': '#8E44AD'         # Darker purple
-        }
-        
+        self.batch_mode = batch_mode
+        self.current_group = "Temporal_Peripheral"  # Default group
         # Create color map for groups
         self.group_colors = plt.cm.tab20(np.linspace(0, 1, len(self.regions)))
         self.initUI()
@@ -805,20 +804,21 @@ class MainWindow(QMainWindow):
             self.viewer.setSceneRect(QRectF(pixmap.rect()))
             self.viewer.fitInView(self.viewer.sceneRect(), Qt.KeepAspectRatio)
             
-            # Show popup reminder with more detailed instructions
-            QMessageBox.information(
-                self,
-                "Getting Started",
-                "1. First, click on the center of the retina to add reference circles\n\n"
-                "2. To draw ROIs:\n"
-                "   - Hold Shift and start drawing\n"
-                "   - Drawing will auto-complete when near start point\n\n"
-                "3. Navigation:\n"
-                "   - Use +/- keys to zoom\n"
-                "   - Drag to pan\n"
-                "   - Ctrl+click to delete ROI",
-                QMessageBox.Ok
-            )
+            # Only show popup in non-batch mode
+            if not self.batch_mode:
+                QMessageBox.information(
+                    self,
+                    "Getting Started",
+                    "1. First, click on the center of the retina to add reference circles\n\n"
+                    "2. To draw ROIs:\n"
+                    "   - Hold Shift and start drawing\n"
+                    "   - Drawing will auto-complete when near start point\n\n"
+                    "3. Navigation:\n"
+                    "   - Use +/- keys to zoom\n"
+                    "   - Drag to pan\n"
+                    "   - Ctrl+click to delete ROI",
+                    QMessageBox.Ok
+                )
             
             # Update status bar
             self.statusBar().showMessage(
@@ -832,7 +832,7 @@ class MainWindow(QMainWindow):
             raise
 
     def confirm_selection(self):
-        """Save ROIs and ask to continue with analysis"""
+        """Save ROIs and close window in batch mode"""
         if not self.viewer.rois:
             QMessageBox.warning(self, "No ROIs", "Please select at least one ROI first.")
             return
@@ -871,20 +871,22 @@ class MainWindow(QMainWindow):
             
             logging.info(f"Saved {len(roi_data)} ROIs to {save_path}")
             
-            # Ask to continue with analysis
-            reply = QMessageBox.question(
-                self,
-                'Continue to Analysis',
-                'ROIs saved successfully. Would you like to run the analysis now?',
-                QMessageBox.Yes | QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                # Close ROI window
+            # In batch mode, just close the window
+            if self.batch_mode:
                 self.close()
-                # Signal parent to run analysis
-                if hasattr(self, 'parent_tool'):
-                    self.parent_tool.run_analysis_with_roi(str(save_path))
+            else:
+                # Ask to continue with analysis only in non-batch mode
+                reply = QMessageBox.question(
+                    self,
+                    'Continue to Analysis',
+                    'ROIs saved successfully. Would you like to run the analysis now?',
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    self.close()
+                    if hasattr(self, 'parent_tool'):
+                        self.parent_tool.run_analysis_with_roi(str(save_path))
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error saving ROIs: {str(e)}")
